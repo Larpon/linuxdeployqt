@@ -29,6 +29,7 @@
 #include <QDir>
 #include <QProcessEnvironment>
 #include "../shared/shared.h"
+#include <QRegularExpression>
 
 int main(int argc, char **argv)
 {
@@ -46,7 +47,7 @@ int main(int argc, char **argv)
         qDebug() << "Options:";
         qDebug() << "   -verbose=<0-3>      : 0 = no output, 1 = error/warning (default), 2 = normal, 3 = debug";
         qDebug() << "   -no-plugins         : Skip plugin deployment";
-        qDebug() << "   -appimage           : Create an AppImage";
+        qDebug() << "   -appimage           : Create an AppImage (implies -bundle-non-qt-libs)";
         qDebug() << "   -no-strip           : Don't run 'strip' on the binaries";
         qDebug() << "   -bundle-non-qt-libs : Also bundle non-core, non-Qt libraries";
         qDebug() << "   -executable=<path>  : Let the given executable use the deployed libraries too";
@@ -57,6 +58,9 @@ int main(int argc, char **argv)
         qDebug() << "linuxdeployqt takes an application as input and makes it";
         qDebug() << "self-contained by copying in the Qt libraries and plugins that";
         qDebug() << "the application uses.";
+        qDebug() << "";
+        qDebug() << "It deploys the Qt instance that qmake on the $PATH points to,";
+        qDebug() << "so make sure that it is the correct one.";
         qDebug() << "";
         qDebug() << "Plugins related to a Qt library are copied in with the";
         qDebug() << "library. The accessibility, image formats, and text codec";
@@ -129,6 +133,7 @@ int main(int argc, char **argv)
         } else if (argument == QByteArray("-appimage")) {
             LogDebug() << "Argument found:" << argument;
             appimage = true;
+            bundleAllButCoreLibs = true;
         } else if (argument == QByteArray("-no-strip")) {
             LogDebug() << "Argument found:" << argument;
             runStripEnabled = false;
