@@ -89,14 +89,20 @@ int main(int argc, char **argv)
         return 1;
     }
 
+    qDebug() << "Dependencies for" << appBinaryPath;
     QMap<QString,ExecutableInfo> appDependencies = resolveDependencies(appBinaryPath);
     for(auto e : appDependencies.keys())
     {
-        qDebug() << e << "," << appDependencies.value(e) << '\n';
+        qDebug() << e << ':';
+        qDebug() << "Dependants:";
+        ExecutableInfo dependant = appDependencies.value(e);
+        foreach(QString so, dependant.dependants) {
+            qDebug() << "\t" << so;
+        }
     }
     //qDebug << appDependencies;
 
-/*
+    /*
     // QDir dir;
     // QString appDir = QDir::cleanPath(appFile + "/../" + appName + ".AppDir");
     QString appDir = QDir::cleanPath(appBinaryPath + "/../");

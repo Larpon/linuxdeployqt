@@ -86,7 +86,6 @@ public:
     QString binaryPath;
     QString resolvedPath;
     QStringList dependants;
-    QStringList dependencies;
 
 };
 
@@ -142,5 +141,6 @@ QMap<QString,ExecutableInfo> resolveDependencies(const QString &binaryPath);
 QMap<QString,ExecutableInfo> resolveDependencies(const QString &binaryPath, QMap<QString,ExecutableInfo> &dependencies );
 QMap<QString,ExecutableInfo> mergeDependencies(QMap<QString,ExecutableInfo> d1, QMap<QString,ExecutableInfo> d2 );
 QStringList getLibrarySearchPaths();
+QString basename(const QString &path);
 
 #endif
