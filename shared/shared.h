@@ -33,6 +33,7 @@
 #include <QStringList>
 #include <QDebug>
 #include <QSet>
+#include <QProcessEnvironment>
 
 extern int logLevel;
 #define LogError()      if (logLevel < 0) {} else qDebug() << "ERROR:"
@@ -76,6 +77,19 @@ public:
     QList<DylibInfo> dependencies;
 };
 
+class ExecutableInfo
+{
+
+public:
+    operator QString() const { return installName; }
+    QString installName;
+    QString binaryPath;
+    QString resolvedPath;
+    QStringList dependants;
+    QStringList dependencies;
+
+};
+
 bool operator==(const LibraryInfo &a, const LibraryInfo &b);
 QDebug operator<<(QDebug debug, const LibraryInfo &info);
 
@@ -86,6 +100,7 @@ class AppDirInfo
     QString binaryPath;
     QStringList libraryPaths;
 };
+
 
 class DeploymentInfo
 {
@@ -122,5 +137,10 @@ QString findAppBinary(const QString &appDirPath);
 QStringList findAppLibraries(const QString &appDirPath);
 void createAppImage(const QString &appBundlePath);
 bool checkAppImagePrerequisites(const QString &appBundlePath);
+
+QMap<QString,ExecutableInfo> resolveDependencies(const QString &binaryPath);
+QMap<QString,ExecutableInfo> resolveDependencies(const QString &binaryPath, QMap<QString,ExecutableInfo> &dependencies );
+QMap<QString,ExecutableInfo> mergeDependencies(QMap<QString,ExecutableInfo> d1, QMap<QString,ExecutableInfo> d2 );
+QStringList getLibrarySearchPaths();
 
 #endif

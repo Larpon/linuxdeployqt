@@ -85,7 +85,15 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    QDir dir;
+    QMap<QString,ExecutableInfo> appDependencies = resolveDependencies(appBinaryPath);
+    for(auto e : appDependencies.keys())
+    {
+        qDebug() << e << "," << appDependencies.value(e) << '\n';
+    }
+    //qDebug << appDependencies;
+
+/*
+    // QDir dir;
     // QString appDir = QDir::cleanPath(appFile + "/../" + appName + ".AppDir");
     QString appDir = QDir::cleanPath(appBinaryPath + "/../");
 
@@ -204,7 +212,7 @@ int main(int argc, char **argv)
     if (appimage) {
         createAppImage(appDirPath);
     }
-
+*/
     return 0;
 }
 

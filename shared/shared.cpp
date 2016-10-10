@@ -1122,3 +1122,309 @@ void createAppImage(const QString &appDirPath)
         LogNormal() << "Created AppImage at" << appImagePath;
     }
 }
+
+
+QStringList getLibrarySearchPaths()
+{
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+
+    QStringList searchPaths;
+    if (env.contains("LD_LIBRARY_PATH")) {
+        searchPaths += env.value("LD_LIBRARY_PATH").split(':');
+    }
+
+    QFile inputFile("/etc/ld.so.conf");
+    if (inputFile.open(QIODevice::ReadOnly)) {
+       QTextStream in(&inputFile);
+       while (!in.atEnd()) {
+          QString line = in.readLine().trimmed();
+          if (line.startsWith("#") || line.length() == 0 || !QDir(line).exists())
+              continue;
+          searchPaths += line;
+       }
+       inputFile.close();
+    }
+
+    QStringList nameFilter("*.conf");
+    QDir directory("/etc/ld.so.conf.d/");
+    QStringList filesAndDirectories = directory.entryList(nameFilter);
+    qDebug() << "Search files" << filesAndDirectories;
+    foreach (QString fileOrDirectory, filesAndDirectories) {
+        fileOrDirectory = directory.path()+QDir::separator()+fileOrDirectory;
+        if (QFile::exists(fileOrDirectory)) {
+            qDebug() << "Search file" << fileOrDirectory;
+            QFile inputFile(fileOrDirectory);
+            if (inputFile.open(QIODevice::ReadOnly)) {
+               QTextStream in(&inputFile);
+               while (!in.atEnd()) {
+                  QString line = in.readLine().trimmed();
+                  if (line.startsWith("#") || line.length() == 0 || !QDir(line).exists())
+                      continue;
+                  searchPaths += line;
+               }
+               inputFile.close();
+            }
+        }
+    }
+
+    // TODO sanitize paths
+
+    //qDebug() << "Search paths" << searchPaths;
+    return searchPaths;
+}
+
+QStringList librarySearchPaths = getLibrarySearchPaths();
+QMap<QString,ExecutableInfo> resolveDependencies(const QString &binaryPath)
+{
+    QMap<QString,ExecutableInfo> dependencies;
+    //dependencies = resolveDependencies(binaryPath, dependencies );
+    return resolveDependencies(binaryPath, dependencies );
+}
+QMap<QString,ExecutableInfo> mergeDependencies(QMap<QString,ExecutableInfo> d1, QMap<QString,ExecutableInfo> d2 )
+{
+    for(auto e : d2.keys()) {
+        if ( d1.contains(e)) {
+            d1[e].dependants.append(d2[e].dependants);
+        } else
+            d1.insert(e, d2.value(e));
+    }
+    return d1;
+}
+
+QMap<QString,ExecutableInfo> resolveDependencies(const QString &binaryPath, QMap<QString,ExecutableInfo> &dependencies )
+{
+    ExecutableInfo info;
+
+    LogDebug() << "Using objdump:";
+    LogDebug() << " inspecting" << binaryPath;
+    QProcess objdump;
+    // TODO find better argument than -x
+    objdump.start("objdump", QStringList() << "-x" << binaryPath);
+    objdump.waitForFinished();
+
+    if (objdump.exitStatus() != QProcess::NormalExit || objdump.exitCode() != 0) {
+        LogError() << "resolveDependencies:" << objdump.readAllStandardError();
+        return dependencies;
+    }
+
+    if( dependencies.contains( binaryPath ) ) {
+        qDebug() << binaryPath << "already resolved";
+        QMap<QString,ExecutableInfo> t;
+        return t;
+    }
+
+    QString rpath("");
+    QString runpath("");
+    QStringList depLibs;
+
+    QString output = objdump.readAllStandardOutput();
+    QStringList outputLines = output.split("\n", QString::SkipEmptyParts);
+    foreach (QString outputLine, outputLines) {
+        //qDebug() << "objdump outputLine:" << outputLine;
+        if (outputLine.contains("NEEDED")){
+            depLibs.append(outputLine.replace("NEEDED","").trimmed());
+            qDebug() << "NEEDED:" << outputLine;
+        }
+        if (outputLine.contains("RPATH")){
+            rpath = outputLine.replace("RPATH","").trimmed();
+            qDebug() << "RPATH:" << rpath;
+        }
+        if (outputLine.contains("RUNPATH")){
+            runpath = outputLine.replace("RUNPATH","").trimmed();
+            qDebug() << "RUNPATH:" << runpath;
+        }
+    }
+
+    QStringList resolvedDependencies;
+
+    foreach (QString libFile, depLibs) {
+        bool found = false;
+
+        if ( ( !rpath.isEmpty() && QDir(rpath).exists() ) && runpath.isEmpty()) { // DT_RPATH only
+            QDir directory(rpath);
+            QStringList rpathContents = directory.entryList();
+
+            foreach (QString someFile, rpathContents) {
+                if (someFile == libFile) {
+                    resolvedDependencies.append(rpath+QDir::separator()+libFile);
+                    found = true;
+                    qDebug() << "Found" << rpath+QDir::separator()+libFile;
+                    break;
+                }
+            }
+        }
+
+        if(!found) {
+            foreach (QString searchDirectory, librarySearchPaths) {
+                qDebug() << "Search directory" << searchDirectory << "\n";
+
+                if (QDir(searchDirectory).exists()) {
+                    QDir directory(searchDirectory);
+                    QStringList dirContents = directory.entryList();
+
+                    foreach (QString someFile, dirContents) {
+                        if (someFile == libFile) {
+                            resolvedDependencies.append(searchDirectory+QDir::separator()+libFile);
+                            found = true;
+                            qDebug() << "Found" << searchDirectory+QDir::separator()+libFile;
+                            break;
+                        }
+                    }
+                } else
+                    LogError() << searchDirectory << "does not exist";
+            }
+        }
+
+        if ( ( !runpath.isEmpty() && QDir(runpath).exists() )) { // DT_RUNPATH
+            QDir directory(runpath);
+            QStringList runpathContents = directory.entryList();
+
+            foreach (QString someFile, runpathContents) {
+                if (someFile == libFile) {
+                    resolvedDependencies.append(runpath+QDir::separator()+libFile);
+                    found = true;
+                    qDebug() << "Found" << runpath+QDir::separator()+libFile;
+                    break;
+                }
+            }
+        }
+
+        if(!found) { // Ouch
+            LogError() << libFile << "can't be found at all";
+        }
+
+    }
+
+    //objdump -x /usr/lib/x86_64-linux-gnu/libQt5Core.so | grep NEEDED
+    //http://blog.lxgcc.net/?tag=dt_runpath
+    //objdump -x <file> | grep RPATH // DT_RPATH
+    //objdump -x <file> | grep RUNPATH // DT_RUNPATH
+
+    qDebug() << "Dependencies for" << binaryPath << ":" << resolvedDependencies;
+
+
+    foreach (QString resolvedDependency, resolvedDependencies) {
+
+        if( ! dependencies.contains( resolvedDependency ) ) {
+
+            QFileInfo fi(resolvedDependency);
+            info.installName = fi.baseName()+'.'+fi.completeSuffix();
+            info.binaryPath = resolvedDependency;
+            info.resolvedPath = fi.canonicalFilePath();
+            info.dependants.append(binaryPath);
+            dependencies.insert(resolvedDependency,info);
+
+            dependencies = mergeDependencies(dependencies,resolveDependencies(resolvedDependency, dependencies ));
+
+        } else
+            dependencies[resolvedDependency].dependants.append(binaryPath);
+
+        //resolveDependencies(resolvedDependency, dependencies );
+    }
+
+
+    return dependencies;
+}
+
+/*
+
+def ldd(executable):
+    '''Get all library dependencies (recursive) of 'executable' '''
+    libs = {}
+    return lddr(executable,libs)
+
+def lddr(executable,libs):
+    '''Get all library dependencies (recursive) of 'executable' '''
+    output = subprocess.check_output(["ldd", "-r", executable])
+    output = output.split('\n')
+
+    for line in output:
+        split = line.split()
+        if len(split) == 0:
+            continue
+
+        if split[0] in blacklist or os.path.basename(split[0]) in blacklist:
+            #debug("'%s' is blacklisted. Skipping..." % (split[0]))
+            continue
+
+        if split[0] == 'statically' and split[1] == 'linked':
+            debug("'%s' is statically linked. Skipping..." % (os.path.basename(executable)))
+            continue
+
+        if len(split) < 3:
+            warn("Could not determine path of %s %s for ldd output line '%s'. Skipping..." % (os.path.basename(executable),split,line))
+            continue
+
+        so = split[0]
+        path = split[2]
+        realpath = os.path.realpath(path)
+
+        if not os.path.exists(path):
+            debug("Can't find path for %s (resolved to %s). Skipping..." % (so,path))
+            continue
+
+        if so not in libs:
+            details = { 'so':so, 'path':path, 'realpath':realpath, 'dependants':set([executable]), 'type':'lib' }
+            libs[so] = details
+
+            debug("Resolved %s to %s" % (so, realpath))
+
+            libs = merge_dicts(libs, lddr(realpath,libs))
+        else:
+            libs[so]['dependants'].add(executable)
+
+    return libs
+
+
+ * /
+
+
+/*
+ObjdumpInfo getDependencyInfo(const QString &binaryPath)
+{
+
+
+
+    static const QRegularExpression regexp(QStringLiteral("^.+ => (.+) \\("));
+
+    QString output = objdump.readAllStandardOutput();
+    QStringList outputLines = output.split("\n", QString::SkipEmptyParts);
+    if (outputLines.size() < 2) {
+        if ((output.contains("statically linked") == false)){
+            LogError() << "Could not parse ldd output under 2 lines:" << output;
+        }
+        return info;
+    }
+
+    foreach (QString outputLine, outputLines) {
+        LogDebug() << "ldd outputLine:" << outputLine;
+        if (outputLine.contains("not found")){
+            LogError() << "ldd outputLine:" << outputLine;
+        }
+    }
+
+    if ((binaryPath.contains(".so.") || binaryPath.endsWith(".so")) and (!output.contains("linux-vdso.so.1"))) {
+        const auto match = regexp.match(outputLines.first());
+        if (match.hasMatch())  {
+            info.installName = match.captured(1);
+        } else {
+            LogError() << "Could not parse ldd output line:" << outputLines.first();
+        }
+        outputLines.removeFirst();
+    }
+
+    for (const QString &outputLine : outputLines) {
+        const auto match = regexp.match(outputLine);
+        if (match.hasMatch()) {
+            DylibInfo dylib;
+            dylib.binaryPath = match.captured(1).trimmed();
+            LogDebug() << " dylib.binaryPath" << dylib.binaryPath;
+
+            info.dependencies << dylib;
+        }
+    }
+
+
+    return info;
+}
+*/
